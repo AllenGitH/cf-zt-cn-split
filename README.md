@@ -19,7 +19,7 @@
 
 ```text
 Loyalsoldier/surge-rules (direct.txt)     soffchen/GeoIP2-CN (CN-ip-cidr.txt)
-        ↓ 精选 CN 直连域名（取前 100 条）           ↓ 全运营商聚合 CIDR（取前 3900 条）
+        ↓ 精选 CN 直连域名（取前 TARGET_DOMAIN_N 条）           ↓ 全运营商聚合 CIDR（取前 X 条）
                         ↓ 合并，域名规则在前 ↓
                       cf-zt-cn-split.py
                         ↓ Cloudflare Zero Trust API（PUT）
@@ -65,7 +65,7 @@ Loyalsoldier/surge-rules (direct.txt)     soffchen/GeoIP2-CN (CN-ip-cidr.txt)
 |---------------|----------------------------------------------------------|----|
 |`CF_API_TOKEN` |Cloudflare API Token，需具备 Zero Trust 写权限                   |✅必填  |
 |`CF_ACCOUNT_ID`|Cloudflare 账户 ID，可在控制台右侧边栏找到                              |✅必填  |
-|`CF_PROFILE_ID`|设备策略 ID，留空则使用默认策略                                         |❌可选  |
+|`CF_PROFILE_ID`|设备策略 ID ~~，留空则使用默认策略~~                                         |✅必填  |
 |`MODE`         |分流模式：`exclude`（CN 直连）或 `include`（仅 CN 走 WARP），默认 `exclude`|❌可选  |
 
 #### 如何获取 API Token
@@ -94,20 +94,21 @@ Loyalsoldier/surge-rules (direct.txt)     soffchen/GeoIP2-CN (CN-ip-cidr.txt)
 
 ### 设备策略（PROFILE_ID）
 
-- **留空**：更新默认设备策略的 Split Tunnels 规则
+- ~~**留空**：更新默认设备策略的 Split Tunnels 规则~~
 - **填写策略 ID**：更新指定的自定义设备策略
 
 -----
 
 ## 规则配额分配
 
-Cloudflare Zero Trust Split Tunnels 单策略最多支持 **4000 条**规则，本项目按如下方式分配：
+Cloudflare Zero Trust Split Tunnels 单策略最多支持 **${MAX_RULES} 条**规则，本项目按如下方式分配：
 
 |规则类型            |条数        |数据来源                                  |优先级     |
 |----------------|----------|--------------------------------------|--------|
-|域名规则（`host`）    |最多 100 条  |Loyalsoldier/surge-rules `direct.txt` |高（DNS 层）|
-|IP 规则（`address`）|最多 3900 条 |soffchen/GeoIP2-CN `CN-ip-cidr.txt`   |低（网络层兜底）|
-|**合计**          |**4000 条**|                                      |        |
+|默认规则（`address`）    |固定 16 条  |Cloudflare Zero Trust Default Policy |高|
+|域名规则（`host`）    |最多 ${TARGET_DOMAIN_N} 条  |Loyalsoldier/surge-rules `direct.txt` |高（DNS 层）|
+|IP 规则（`address`）|剩余配额 |soffchen/GeoIP2-CN `CN-ip-cidr.txt`   |低（网络层兜底）|
+|**合计**          |**${MAX_RULES} 条**|                                      |        |
 
 > 域名规则排列在前，确保 DNS 层优先命中；IP 规则在后作为网络层兜底。
 
@@ -141,7 +142,7 @@ pip install requests
 # 设置环境变量
 export CF_API_TOKEN="your_api_token"
 export CF_ACCOUNT_ID="your_account_id"
-export CF_PROFILE_ID=""   # 留空使用默认策略
+export CF_PROFILE_ID="your_profile_id"
 export MODE="exclude"
 
 # 运行脚本
@@ -152,17 +153,16 @@ python cf-zt-cn-split.py
 
 ```
 🔄 拉取最新 CN geo 数据...
-   IP 数据源获取到 3958 条 CIDR
-   域名数据源获取到 1183 条域名（已过滤非法格式）
-   域名规则：100 条 | IP 规则：3900 条 | 合计：4000 条
-✅ 同步成功！4000 条路由 | Mode: exclude
+   IP 数据源获取到 3916 条 CIDR
+   默认规则：16 条 | 域名规则：0 条 | IP 规则：3916 条 | 合计：3932 条
+✅ 同步成功！3932 条路由 | Mode: exclude
 ```
 
 -----
 
 ## GitHub Actions 定时任务
 
-默认配置为每天 UTC 02:00（北京时间 10:00）自动运行，也可在 Actions 页面点击 **Run workflow** 手动触发。
+默认配置为每天 UTC 03:00（北京时间 11:00）自动运行，也可在 Actions 页面点击 **Run workflow** 手动触发。
 
 如需修改定时频率，编辑 `.github/workflows/` 下 workflow 文件中的 `cron` 表达式。
 
