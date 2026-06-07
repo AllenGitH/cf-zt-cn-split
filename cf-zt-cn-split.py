@@ -69,27 +69,12 @@ def get_cn_domains():
     return unique
 
 
-def update_split_tunnels(cidrs, domains):
-    # 动态分配配额：域名取 TARGET_DOMAIN_N 条，剩余给 IP
-    max_domains = min(TARGET_DOMAIN_N, len(domains))
-    max_ips     = min(MAX_RULES - max_domains, len(cidrs))
-
-    # 域名规则在前（DNS 层优先命中），IP 规则在后（网络层兜底）
-    domain_entries = [{"host":    d,    "description": "CN Domain"} for d    in domains[:max_domains]]
-    ip_entries     = [{"address": cidr, "description": "CN IP"}     for cidr in cidrs[:max_ips]]
-    routes = domain_entries + ip_entries
-
-    print(f"   域名规则：{len(domain_entries)} 条 | IP 规则：{len(ip_entries)} 条 | 合计：{len(routes)} 条")
-
-    if len(routes) > MAX_RULES:
-        print(f"⚠️  规则总数超出限制，已截断至 {MAX_RULES} 条")
-        routes = routes[:MAX_RULES]
-
+def update_split_tunnels(routes):
     if PROFILE_ID:
         url = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/devices/policy/{PROFILE_ID}/{MODE}"
     else:
-        url = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/devices/policy/{MODE}"
-
+        raise ValueError("缺少环境变量！请在 GitHub Secrets 设置 PROFILE_ID")
+        # url = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/devices/policy/{MODE}"
     resp = requests.put(url, json=routes, headers=HEADERS)
     if resp.status_code in (200, 204):
         print(f"✅ 同步成功！{len(routes)} 条路由 | Mode: {MODE}")
@@ -98,8 +83,38 @@ def update_split_tunnels(cidrs, domains):
         resp.raise_for_status()
 
 
-if __name__ == "__main__":
+def main():
+    default_exclude_ips = ["ff05::/16", "ff04::/16", "ff03::/16", "ff02::/16", "ff01::/16",
+                          "fe80::/10", "fd00::/8", "255.255.255.255/32", "240.0.0.0/4",
+                          "224.0.0.0/24", "192.168.0.0/16", "192.0.0.0/24", "172.16.0.0/12",
+                          "169.254.0.0/16", "100.64.0.0/10", "10.0.0.0/8",
+                          ]
+    
     print("🔄 拉取最新 CN geo 数据...")
+    domains = []
+    if TARGET_DOMAIN_N > 0:
+        domains = get_cn_domains()
     cidrs   = get_cn_cidrs()
-    domains = get_cn_domains()
-    update_split_tunnels(cidrs, domains)
+    
+    # 动态分配配额：域名取 TARGET_DOMAIN_N 条，保留 default_exclude_ips，剩余给 IP
+    max_domains = min(TARGET_DOMAIN_N, len(domains))
+    max_ips     = min(MAX_RULES - max_domains - len(default_exclude_ips), len(cidrs))
+
+    # default_exclude_ips 和 域名规则在前（DNS 层优先命中），IP 规则在后（网络层兜底）
+    default_exclude_entries = [{"address": str_ip, "description": "default_exclude_ip"}
+                               for str_ip in default_exclude_ips]
+    domain_entries = [{"host":    d,    "description": "CN Domain"} for d    in domains[:max_domains]]
+    ip_entries     = [{"address": cidr, "description": "CN IP"}     for cidr in cidrs[:max_ips]]
+    routes = default_exclude_entries + domain_entries + ip_entries
+
+    print(f"   默认规则：{len(default_exclude_entries)} 条 | 域名规则：{len(domain_entries)} 条 | IP 规则：{len(ip_entries)} 条 | 合计：{len(routes)} 条")
+
+    if len(routes) > MAX_RULES:
+        print(f"⚠️  规则总数超出限制，已截断至 {MAX_RULES} 条")
+        routes = routes[:MAX_RULES]
+
+    update_split_tunnels(routes)
+
+
+if __name__ == "__main__":
+    main()
